@@ -1,0 +1,114 @@
+# forest_fire_soc.py
+import numpy as np
+import matplotlib.pyplot as plt
+from collections import defaultdict
+
+# States
+EMPTY, TREE, FIRE = 0, 1, 2
+
+def init_grid(N, rho0=0.5):
+    """Initialize grid with random tree density rho0."""
+    grid = np.zeros((N, N), dtype=int)
+    grid[np.random.rand(N, N) < rho0] = TREE
+    return grid
+
+def find_cluster(grid, r, c, N):
+    """BFS to find all connected trees from (r,c)."""
+    cluster = []
+    visited = set()
+    queue = [(r, c)]
+    while queue:
+        x, y = queue.pop()
+        if (x, y) in visited: continue
+        visited.add((x, y))
+        if grid[x, y] == TREE:
+            cluster.append((x, y))
+            for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                nx, ny = x+dx, y+dy
+                if 0 <= nx < N and 0 <= ny < N:
+                    queue.append((nx, ny))
+    return cluster
+
+def step(grid, N, p, f):
+    """One timestep of the forest fire model."""
+    new_grid = grid.copy()
+    avalanche_size = 0
+    
+    # Spread fire
+    for r in range(N):
+        for c in range(N):
+            if grid[r, c] == FIRE:
+                new_grid[r, c] = EMPTY
+                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    nr, nc = r+dr, c+dc
+                    if 0 <= nr < N and 0 <= nc < N and grid[nr, nc] == TREE:
+                        new_grid[nr, nc] = FIRE
+                        avalanche_size += 1
+    
+    # Grow trees and lightning
+    for r in range(N):
+        for c in range(N):
+            if new_grid[r, c] == EMPTY:
+                if np.random.rand() < p:
+                    new_grid[r, c] = TREE
+            elif new_grid[r, c] == TREE:
+                if np.random.rand() < f:
+                    new_grid[r, c] = FIRE
+                    avalanche_size += 1
+    
+    return new_grid, avalanche_size
+
+def run_simulation(N=50, p=0.05, f=0.001, steps=5000):
+    grid = init_grid(N)
+    sizes = []
+    
+    for t in range(steps):
+        grid, size = step(grid, N, p, f)
+        if size > 0:
+            sizes.append(size)
+    
+    return sizes
+
+def plot_power_law(sizes):
+    counts = defaultdict(int)
+    for s in sizes:
+        counts[s] += 1
+    
+    x = sorted(counts.keys())
+    y = [counts[k] for k in x]
+    
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    
+    # Linear scale
+    axes[0].bar(x[:30], y[:30], color='steelblue', alpha=0.7)
+    axes[0].set_xlabel('Avalanche size')
+    axes[0].set_ylabel('Frequency')
+    axes[0].set_title('Frequency distribution (linear)')
+    
+    # Log-log scale
+    axes[1].scatter(x, y, color='coral', s=10, alpha=0.7)
+    axes[1].set_xscale('log')
+    axes[1].set_yscale('log')
+    axes[1].set_xlabel('Avalanche size (log)')
+    axes[1].set_ylabel('Frequency (log)')
+    axes[1].set_title('Frequency distribution (log-log)')
+    
+    # Fit power law
+    log_x = np.log(x)
+    log_y = np.log(y)
+    slope, intercept = np.polyfit(log_x, log_y, 1)
+    fit_y = np.exp(intercept) * np.array(x)**slope
+    axes[1].plot(x, fit_y, 'k--', label=f'Power law: τ = {-slope:.2f}')
+    axes[1].legend()
+    
+    plt.tight_layout()
+    plt.savefig('soc_avalanche_distribution.pdf', dpi=150, bbox_inches='tight')
+    plt.show()
+    print(f"Power-law exponent τ = {-slope:.3f}")
+    return slope
+
+if __name__ == '__main__':
+    print("Running simulation...")
+    sizes = run_simulation(N=60, p=0.02, f=0.0002, steps=8000)
+    print(f"Total avalanches: {len(sizes)}")
+    slope = plot_power_law(sizes)
